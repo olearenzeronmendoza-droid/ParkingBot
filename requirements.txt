@@ -1,0 +1,5 @@
+Flask
+gspread
+oauth2client
+python-telegram-bot==20.3
+gunicorn
