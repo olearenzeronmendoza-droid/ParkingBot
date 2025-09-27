@@ -1,5 +1,8 @@
-Flask
-gspread
-oauth2client
-python-telegram-bot==20.3
+flask
 gunicorn
+python-dotenv
+requests
+google-api-python-client
+google-auth
+google-auth-oauthlib
+google-auth-httplib2
