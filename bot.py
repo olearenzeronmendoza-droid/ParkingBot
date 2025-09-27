@@ -1,12 +1,13 @@
 import os
 import json
-import asyncio
+import threading
 from datetime import datetime
 from flask import Flask, request, jsonify
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from telegram.ext import Application, CommandHandler, ContextTypes
 from telegram import Update
+import asyncio
 
 # ---------- CONFIG ----------
 GOOGLE_SHEET_NAME = "ParkingBot Data"
@@ -45,7 +46,7 @@ def count_motos_inside(student_number):
     outs = sum(1 for r in rows if str(r.get("student_number")) == str(student_number) and r.get("direction") == "OUT")
     return max(0, ins - outs)
 
-# ---------- Flask Endpoint for RFID taps ----------
+# ---------- Flask Endpoint ----------
 @app.route("/rfid_tap", methods=["POST"])
 def rfid_tap():
     data = request.get_json(force=True)
@@ -76,25 +77,24 @@ def rfid_tap():
     motos_left = max(0, num_motos - motos_after)
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    log_row = [uid, name, student_number, plates, direction, timestamp, motos_after, motos_left]
-    logs_ws.append_row(log_row)
+    logs_ws.append_row([uid, name, student_number, plates, direction, timestamp, motos_after, motos_left])
 
     # Telegram notify
     telegram_id = reg.get("Telegram ID") if reg else None
-    if telegram_id:
+    if telegram_id and hasattr(app, "bot_app"):
+        msg = (
+            f"✅ {direction} recorded\n"
+            f"Name: {name}\n"
+            f"Student #: {student_number}\n"
+            f"Plates: {plates}\n"
+            f"Motos inside: {motos_after}\n"
+            f"Motos left: {motos_left}\n"
+            f"Time: {timestamp}"
+        )
         try:
-            msg = (
-                f"✅ {direction} recorded\n"
-                f"Name: {name}\n"
-                f"Student #: {student_number}\n"
-                f"Plates: {plates}\n"
-                f"Motos inside: {motos_after}\n"
-                f"Motos left: {motos_left}\n"
-                f"Time: {timestamp}"
-            )
-            # Use asyncio-safe way to send
-            asyncio.create_task(
-                app.bot_app.bot.send_message(chat_id=int(telegram_id), text=msg)
+            asyncio.run_coroutine_threadsafe(
+                app.bot_app.bot.send_message(chat_id=int(telegram_id), text=msg),
+                app.bot_loop
             )
         except Exception as e:
             print("Telegram send error:", e)
@@ -111,50 +111,40 @@ def rfid_tap():
         "motos_left": motos_left
     }), 200
 
-# ---------- Telegram Bot Handlers ----------
+# ---------- Telegram Bot ----------
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "👋 Hello! Use /register to sign up. You’ll receive entry/exit logs here."
-    )
+    await update.message.reply_text("👋 Hello! Use /register to sign up.")
 
 async def about_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "🚗 ParkingBot helps manage student motorcycle parking.\n"
-        "It logs entries/exits and sends you real-time updates."
-    )
+    await update.message.reply_text("🚗 ParkingBot logs motorcycle parking and notifies you.")
 
 async def register_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        f"📝 Please register here: {GOOGLE_FORM_LINK}\n\n"
-        "Make sure to include your Telegram ID so I can notify you."
-    )
+    await update.message.reply_text(f"📝 Register here: {GOOGLE_FORM_LINK}")
 
-# ---------- Start Telegram + Flask together ----------
-async def start_bot():
+def run_bot():
     token = os.environ.get("BOT_TOKEN")
     if not token:
-        raise Exception("❌ BOT_TOKEN environment variable not set!")
+        raise Exception("❌ BOT_TOKEN not set!")
 
-    app.bot_app = Application.builder().token(token).build()
-    app.bot_app.add_handler(CommandHandler("start", start_cmd))
-    app.bot_app.add_handler(CommandHandler("about", about_cmd))
-    app.bot_app.add_handler(CommandHandler("register", register_cmd))
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
 
-    # Run polling in background
-    asyncio.create_task(app.bot_app.run_polling())
+    bot_app = Application.builder().token(token).build()
+    bot_app.add_handler(CommandHandler("start", start_cmd))
+    bot_app.add_handler(CommandHandler("about", about_cmd))
+    bot_app.add_handler(CommandHandler("register", register_cmd))
 
-# Entrypoint for Render
-def create_app():
-    loop = asyncio.get_event_loop()
-    if not loop.is_running():
-        loop.run_until_complete(start_bot())
-    else:
-        asyncio.create_task(start_bot())
-    return app
+    app.bot_app = bot_app
+    app.bot_loop = loop
 
-# For Gunicorn
-application = create_app()
+    loop.run_until_complete(bot_app.initialize())
+    loop.create_task(bot_app.start())
+    loop.run_forever()
 
+# Start bot in background thread
+threading.Thread(target=run_bot, daemon=True).start()
+
+# ---------- Entrypoint ----------
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
