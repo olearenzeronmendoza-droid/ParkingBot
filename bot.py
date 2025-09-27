@@ -113,4 +113,41 @@ def rfid_tap():
     }), 200
 
 # ---------- Telegram Bot Handlers ----------
-async def start_cmd(update: Update, context:_
+async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "👋 Hello! Use /register to sign up. You’ll receive entry/exit logs here."
+    )
+
+async def about_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "🚗 ParkingBot helps manage student motorcycle parking.\n"
+        "It logs entries/exits and sends you real-time updates."
+    )
+
+async def register_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        f"📝 Please register here: {GOOGLE_FORM_LINK}\n\n"
+        "Make sure to include your Telegram ID so I can notify you."
+    )
+
+# ---------- TELEGRAM BOT APP ----------
+def run_bot():
+    token = os.environ.get("BOT_TOKEN")
+    if not token:
+        raise Exception("❌ BOT_TOKEN environment variable not set!")
+
+    app.bot_app = Application.builder().token(token).build()
+
+    app.bot_app.add_handler(CommandHandler("start", start_cmd))
+    app.bot_app.add_handler(CommandHandler("about", about_cmd))
+    app.bot_app.add_handler(CommandHandler("register", register_cmd))
+
+    app.bot_app.run_polling()
+
+# Run bot in background thread
+threading.Thread(target=run_bot, daemon=True).start()
+
+# ---------- Flask Entrypoint ----------
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
