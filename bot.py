@@ -1,6 +1,6 @@
 import os
 import json
-import threading
+import asyncio
 from datetime import datetime
 from flask import Flask, request, jsonify
 import gspread
@@ -9,8 +9,8 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 from telegram import Update
 
 # ---------- CONFIG ----------
-GOOGLE_SHEET_NAME = "ParkingBot Data"  # <-- change to the exact name of your Google Sheet
-GOOGLE_FORM_LINK = "https://docs.google.com/forms/d/e/1FAIpQLScPJ8EXzwmKnsQxv0vunid4SZy_JUo98ewvr-_eZhSLdUI2kw/viewform"  # <-- replace with your real Google Form link
+GOOGLE_SHEET_NAME = "ParkingBot Data"
+GOOGLE_FORM_LINK = "https://docs.google.com/forms/d/e/1FAIpQLScPJ8EXzwmKnsQxv0vunid4SZy_JUo98ewvr-_eZhSLdUI2kw/viewform"
 
 # ---------- Flask App ----------
 app = Flask(__name__)
@@ -18,7 +18,6 @@ app = Flask(__name__)
 # ---------- Google Sheets Setup ----------
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 
-# Load credentials from environment variable
 creds_json = os.environ.get("GOOGLE_CREDS_JSON")
 if not creds_json:
     raise Exception("❌ GOOGLE_CREDS_JSON environment variable not set!")
@@ -26,11 +25,10 @@ creds_dict = json.loads(creds_json)
 creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 gc = gspread.authorize(creds)
 
-# Open Google Sheet
 ss = gc.open(GOOGLE_SHEET_NAME)
-db_ws = ss.worksheet("database")      # must exist in your sheet
-reg_ws = ss.worksheet("registration") # must exist in your sheet
-logs_ws = ss.worksheet("logs")        # must exist in your sheet
+db_ws = ss.worksheet("database")
+reg_ws = ss.worksheet("registration")
+logs_ws = ss.worksheet("logs")
 
 # ---------- HELPER FUNCTIONS ----------
 def find_db_by_uid(uid):
@@ -94,9 +92,10 @@ def rfid_tap():
                 f"Motos left: {motos_left}\n"
                 f"Time: {timestamp}"
             )
-            threading.Thread(
-                target=lambda: app.bot_app.bot.send_message(chat_id=int(telegram_id), text=msg)
-            ).start()
+            # Use asyncio-safe way to send
+            asyncio.create_task(
+                app.bot_app.bot.send_message(chat_id=int(telegram_id), text=msg)
+            )
         except Exception as e:
             print("Telegram send error:", e)
 
@@ -130,24 +129,32 @@ async def register_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Make sure to include your Telegram ID so I can notify you."
     )
 
-# ---------- TELEGRAM BOT APP ----------
-def run_bot():
+# ---------- Start Telegram + Flask together ----------
+async def start_bot():
     token = os.environ.get("BOT_TOKEN")
     if not token:
         raise Exception("❌ BOT_TOKEN environment variable not set!")
 
     app.bot_app = Application.builder().token(token).build()
-
     app.bot_app.add_handler(CommandHandler("start", start_cmd))
     app.bot_app.add_handler(CommandHandler("about", about_cmd))
     app.bot_app.add_handler(CommandHandler("register", register_cmd))
 
-    app.bot_app.run_polling()
+    # Run polling in background
+    asyncio.create_task(app.bot_app.run_polling())
 
-# Run bot in background thread
-threading.Thread(target=run_bot, daemon=True).start()
+# Entrypoint for Render
+def create_app():
+    loop = asyncio.get_event_loop()
+    if not loop.is_running():
+        loop.run_until_complete(start_bot())
+    else:
+        asyncio.create_task(start_bot())
+    return app
 
-# ---------- Flask Entrypoint ----------
+# For Gunicorn
+application = create_app()
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
