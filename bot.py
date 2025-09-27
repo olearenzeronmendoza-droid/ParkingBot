@@ -126,20 +126,19 @@ def run_bot():
     if not token:
         raise Exception("❌ BOT_TOKEN not set!")
 
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+    async def main():
+        bot_app = Application.builder().token(token).build()
+        bot_app.add_handler(CommandHandler("start", start_cmd))
+        bot_app.add_handler(CommandHandler("about", about_cmd))
+        bot_app.add_handler(CommandHandler("register", register_cmd))
 
-    bot_app = Application.builder().token(token).build()
-    bot_app.add_handler(CommandHandler("start", start_cmd))
-    bot_app.add_handler(CommandHandler("about", about_cmd))
-    bot_app.add_handler(CommandHandler("register", register_cmd))
+        app.bot_app = bot_app
+        app.bot_loop = asyncio.get_event_loop()
 
-    app.bot_app = bot_app
-    app.bot_loop = loop
+        print("🚀 Telegram bot is starting polling...")
+        await bot_app.run_polling()
 
-    loop.run_until_complete(bot_app.initialize())
-    loop.create_task(bot_app.start())
-    loop.run_forever()
+    asyncio.run(main())
 
 # Start bot in background thread
 threading.Thread(target=run_bot, daemon=True).start()
