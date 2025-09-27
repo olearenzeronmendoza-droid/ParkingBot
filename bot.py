@@ -146,7 +146,8 @@ def run_bot():
         app.bot_loop = asyncio.get_running_loop()
 
         print("🚀 Telegram bot is starting polling...")
-        await bot_app.run_polling()
+        # ✅ fix: disable signal handling (since we’re in a thread)
+        await bot_app.run_polling(close_loop=False, stop_signals=None)
 
     asyncio.run(main())
 
