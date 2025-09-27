@@ -5,7 +5,7 @@ from datetime import datetime
 from flask import Flask, request, jsonify
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 from telegram import Update
 import asyncio
 
@@ -111,7 +111,7 @@ def rfid_tap():
         "motos_left": motos_left
     }), 200
 
-# ---------- Telegram Bot ----------
+# ---------- Telegram Commands ----------
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("👋 Hello! Use /register to sign up.")
 
@@ -121,6 +121,11 @@ async def about_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def register_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"📝 Register here: {GOOGLE_FORM_LINK}")
 
+async def echo_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Reply to any message (for debugging)."""
+    await update.message.reply_text(f"🔄 You said: {update.message.text}")
+
+# ---------- Telegram Bot ----------
 def run_bot():
     token = os.environ.get("BOT_TOKEN")
     if not token:
@@ -128,12 +133,17 @@ def run_bot():
 
     async def main():
         bot_app = Application.builder().token(token).build()
+
+        # Commands
         bot_app.add_handler(CommandHandler("start", start_cmd))
         bot_app.add_handler(CommandHandler("about", about_cmd))
         bot_app.add_handler(CommandHandler("register", register_cmd))
 
+        # Debug echo
+        bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo_all))
+
         app.bot_app = bot_app
-        app.bot_loop = asyncio.get_event_loop()
+        app.bot_loop = asyncio.get_running_loop()
 
         print("🚀 Telegram bot is starting polling...")
         await bot_app.run_polling()
